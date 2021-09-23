@@ -3,13 +3,13 @@ require("dotenv").config()
 const Payment = require("../models/stripe")
 const Order = require("../models/order")
 
-const sKey = process.env.STRIPE_SKEY_LIVE
+const sKey = process.env.STRIPE_SKEY_TEST
 const endpointSecret = process.env.STRIPE_SECRET
 
 const stripe = require("stripe")(sKey)
 
 const makePayments = async (req, res, next) => {
-  const { price, email } = req.body
+  const { price, email, id } = req.body
 
   console.log("Price =>", price)
 
@@ -17,26 +17,40 @@ const makePayments = async (req, res, next) => {
     return res.status(400).json({ message: "Error: No price field" })
   }
 
-  const paymentIntent = await stripe.paymentIntents.create({
-    amount: Math.round(price * 100),
-    currency: "usd",
-    payment_method_types: ["card"],
-  })
-
-  const metaData = {
-    amount: price,
-    email: email,
-    meta: JSON.stringify(req.body),
-    pi: paymentIntent.id,
+  if (id) {
+    const paymentIntent = await stripe.paymentIntents.update(id, {
+      metadata: { amount: Math.round(price * 100) },
+    })
+    await Payment.findOneAndUpdate(
+      { pi: id },
+      { email: email, amount: price, pi: paymentIntent.id },
+      { new: true }
+    )
+    res.json({
+      clientSecret: paymentIntent.client_secret,
+      message: "OK:",
+      id: paymentIntent.id,
+    })
+  } else {
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(price * 100),
+      currency: "usd",
+      payment_method_types: ["card"],
+    })
+    const metaData = {
+      amount: price,
+      email: email,
+      meta: JSON.stringify(req.body),
+      pi: paymentIntent.id,
+    }
+    await Payment.create(metaData)
+    console.log(paymentIntent.client_secret)
+    res.json({
+      clientSecret: paymentIntent.client_secret,
+      message: "OK:",
+      id: paymentIntent.id,
+    })
   }
-
-  await Payment.create(metaData)
-
-  console.log(paymentIntent.client_secret)
-  res.json({
-    clientSecret: paymentIntent.client_secret,
-    message: "OK:",
-  })
 }
 
 const verifyPayment = async (req, res) => {
